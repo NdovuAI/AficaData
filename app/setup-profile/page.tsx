@@ -111,58 +111,65 @@ export default function SetupProfile() {
       console.log("Testing database connectivity...")
 
       try {
-        // Test database connectivity with a simple query that doesn't rely on schema cache
-        const { data, error: connectivityError } = await supabaseClient
-          .from("user_profiles")
-          .select("id")
-          .limit(1)
-          .maybeSingle()
+        // First try to check if tables exist by querying system tables
+        const { data: tableCheck, error: tableError } = await supabaseClient
+          .rpc("check_table_exists", { table_name: "user_profiles" })
+          .single()
 
-        if (connectivityError) {
-          // Handle specific error types
-          const isTableMissing =
-            connectivityError.message?.includes("Could not find the table") ||
-            connectivityError.message?.includes("schema cache") ||
-            connectivityError.code === "42P01" ||
-            connectivityError.code === "PGRST106"
+        // If RPC fails, fall back to direct table access
+        if (tableError) {
+          console.log("RPC check failed, trying direct table access...")
 
-          if (isTableMissing) {
-            console.error("Database tables not found:", connectivityError)
+          const { data, error: connectivityError } = await supabaseClient.from("user_profiles").select("id").limit(1)
+
+          if (connectivityError) {
+            // Handle specific error types
+            const isTableMissing =
+              connectivityError.message?.includes("Could not find the table") ||
+              connectivityError.message?.includes("schema cache") ||
+              connectivityError.code === "42P01" ||
+              connectivityError.code === "PGRST106"
+
+            if (isTableMissing) {
+              console.error("Database tables not found:", connectivityError)
+              setDatabaseError({
+                type: "tables_missing",
+                message: "Database tables not found",
+                details: connectivityError.message,
+                solution:
+                  "The required database tables are missing. Please run the database setup script (05-create-missing-tables.sql) in your Supabase SQL editor.",
+              })
+              return
+            }
+
+            // Handle RLS policy issues
+            const isRLSIssue =
+              connectivityError.message?.includes("RLS") ||
+              connectivityError.message?.includes("policy") ||
+              connectivityError.code === "42501"
+
+            if (isRLSIssue) {
+              console.error("RLS policy error:", connectivityError)
+              setDatabaseError({
+                type: "rls_error",
+                message: "Database access denied",
+                details: connectivityError.message,
+                solution:
+                  "Database access is restricted. Please run the database setup script to create proper RLS policies.",
+              })
+              return
+            }
+
+            // Other database errors
+            console.error("Database connection failed:", connectivityError)
             setDatabaseError({
-              type: "tables_missing",
-              message: "Database tables not found",
+              type: "connection_error",
+              message: "Cannot connect to database",
               details: connectivityError.message,
-              solution: "The required database tables are missing. Please contact support to set up the database.",
+              solution: "Database connection failed. Please check your internet connection and try again.",
             })
             return
           }
-
-          // Handle RLS policy issues
-          const isRLSIssue =
-            connectivityError.message?.includes("RLS") ||
-            connectivityError.message?.includes("policy") ||
-            connectivityError.code === "42501"
-
-          if (isRLSIssue) {
-            console.error("RLS policy error:", connectivityError)
-            setDatabaseError({
-              type: "rls_error",
-              message: "Database access denied",
-              details: connectivityError.message,
-              solution: "Database access is restricted. Please contact support.",
-            })
-            return
-          }
-
-          // Other database errors
-          console.error("Database connection failed:", connectivityError)
-          setDatabaseError({
-            type: "connection_error",
-            message: "Cannot connect to database",
-            details: connectivityError.message,
-            solution: "Database connection failed. Please check your internet connection and try again.",
-          })
-          return
         }
 
         console.log("Database connection successful, checking for existing profile...")
@@ -179,7 +186,8 @@ export default function SetupProfile() {
             type: "database_error",
             message: "Profile check failed",
             details: profileError.message,
-            solution: "Unable to check existing profile. Please try again.",
+            solution:
+              "Unable to check existing profile. Please try again or run the database setup script (05-create-missing-tables.sql).",
           })
           return
         }
@@ -198,7 +206,8 @@ export default function SetupProfile() {
           type: "connection_error",
           message: "Unexpected error",
           details: err.message || "An unexpected error occurred",
-          solution: "Please refresh the page and try again.",
+          solution:
+            "Please refresh the page and try again. If the problem persists, run the database setup script (05-create-missing-tables.sql).",
         })
       }
     } catch (err: any) {
