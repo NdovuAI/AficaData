@@ -1,7 +1,20 @@
 import { createServerClient } from "@supabase/ssr"
 import { NextResponse, type NextRequest } from "next/server"
 
+const isSupabaseConfigured =
+  typeof process.env.NEXT_PUBLIC_SUPABASE_URL === "string" &&
+  process.env.NEXT_PUBLIC_SUPABASE_URL.length > 0 &&
+  typeof process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY === "string" &&
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY.length > 0
+
 export async function middleware(request: NextRequest) {
+  if (!isSupabaseConfigured) {
+    console.warn("Supabase environment variables not configured properly")
+    return NextResponse.next({
+      request,
+    })
+  }
+
   let supabaseResponse = NextResponse.next({
     request,
   })
@@ -46,16 +59,24 @@ export async function middleware(request: NextRequest) {
 
   // Redirect authenticated users away from login page
   if (user && request.nextUrl.pathname === "/") {
-    // Check if user has completed profile setup
-    const { data: profile } = await supabase.from("user_profiles").select("*").eq("user_id", user.id).single()
+    try {
+      // Check if user has completed profile setup
+      const { data: profile } = await supabase.from("user_profiles").select("*").eq("user_id", user.id).single()
 
-    const url = request.nextUrl.clone()
-    if (!profile) {
+      const url = request.nextUrl.clone()
+      if (!profile) {
+        url.pathname = "/setup-profile"
+      } else {
+        url.pathname = "/translate"
+      }
+      return NextResponse.redirect(url)
+    } catch (error) {
+      console.error("Database error in middleware:", error)
+      // If database error, redirect to setup-profile to handle it
+      const url = request.nextUrl.clone()
       url.pathname = "/setup-profile"
-    } else {
-      url.pathname = "/translate"
+      return NextResponse.redirect(url)
     }
-    return NextResponse.redirect(url)
   }
 
   // IMPORTANT: You *must* return the supabaseResponse object as it is. If you're
