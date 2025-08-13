@@ -10,49 +10,54 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Badge } from "@/components/ui/badge"
 import { useRouter } from "next/navigation"
 import { toast } from "@/hooks/use-toast"
-import { LogOut, RefreshCw, Send } from "lucide-react"
+import { LogOut, RefreshCw, Send, Globe } from "lucide-react"
 import { DatabaseStatus } from "@/components/database-status"
 
-const AFRICAN_LANGUAGES = [
-  { code: "sw", name: "Swahili" },
-  { code: "luo", name: "Luo" },
-  { code: "kik", name: "Kikuyu" },
-  { code: "kal", name: "Kalenjin" },
-  { code: "som", name: "Somali" },
-  { code: "luy", name: "Luhya" },
-  { code: "kam", name: "Kamba" },
-  { code: "mer", name: "Meru" },
-  { code: "kis", name: "Kisii" },
-  { code: "tuk", name: "Turkana" },
+const TARGET_LANGUAGES = [
+  { code: "kalenjin", name: "Kalenjin", dialect: "Nandi" },
+  { code: "kalenjin", name: "Kalenjin", dialect: "Kipsigis" },
+  { code: "kalenjin", name: "Kalenjin", dialect: "Tugen" },
 ]
 
-interface EnglishSentence {
+const SOURCE_LANGUAGES = [
+  { code: "english", name: "English" },
+  { code: "swahili", name: "Kiswahili" },
+]
+
+interface StandardSentence {
   id: string
-  text_content: string
+  original_text: string
+  original_language: string
   category: string
   difficulty_level: string
+  source: string
+  topic: string
 }
 
 interface UserStats {
   total_translations: number
-  pending_reviews: number
-  approved_translations: number
-  rejected_translations: number
+  correct_translations: number
+  accuracy_percentage: number
+  average_score: number
+  languages_practiced: string[]
 }
 
 export default function TranslatePage() {
   const [user, setUser] = useState<any>(null)
   const [userProfile, setUserProfile] = useState<any>(null)
-  const [currentSentence, setCurrentSentence] = useState<EnglishSentence | null>(null)
-  const [selectedLanguage, setSelectedLanguage] = useState("")
+  const [currentSentence, setCurrentSentence] = useState<StandardSentence | null>(null)
+  const [sourceLanguage, setSourceLanguage] = useState("english")
+  const [targetLanguage, setTargetLanguage] = useState("kalenjin")
+  const [selectedDialect, setSelectedDialect] = useState("Nandi")
   const [translation, setTranslation] = useState("")
   const [isLoading, setIsLoading] = useState(false)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [userStats, setUserStats] = useState<UserStats>({
     total_translations: 0,
-    pending_reviews: 0,
-    approved_translations: 0,
-    rejected_translations: 0,
+    correct_translations: 0,
+    accuracy_percentage: 0,
+    average_score: 0,
+    languages_practiced: [],
   })
 
   const router = useRouter()
@@ -83,69 +88,48 @@ export default function TranslatePage() {
   }, [router, supabase])
 
   const loadUserStats = async (userId: string) => {
-    const { data: translations } = await supabase
-      .from("translations")
-      .select("review_status")
-      .eq("translator_id", userId)
+    try {
+      const { data, error } = await supabase.rpc("get_user_translation_stats", {
+        p_user_id: userId,
+      })
 
-    if (translations) {
-      const stats = translations.reduce(
-        (acc, t) => {
-          acc.total_translations++
-          if (t.review_status === "pending") acc.pending_reviews++
-          if (t.review_status === "approved") acc.approved_translations++
-          if (t.review_status === "rejected") acc.rejected_translations++
-          return acc
-        },
-        {
-          total_translations: 0,
-          pending_reviews: 0,
-          approved_translations: 0,
-          rejected_translations: 0,
-        },
-      )
-      setUserStats(stats)
+      if (error) throw error
+
+      if (data && data.length > 0) {
+        const stats = data[0]
+        setUserStats({
+          total_translations: Number.parseInt(stats.total_translations) || 0,
+          correct_translations: Number.parseInt(stats.correct_translations) || 0,
+          accuracy_percentage: Number.parseFloat(stats.accuracy_percentage) || 0,
+          average_score: Number.parseFloat(stats.average_score) || 0,
+          languages_practiced: stats.languages_practiced || [],
+        })
+      }
+    } catch (error: any) {
+      console.error("Error loading user stats:", error)
     }
   }
 
   const fetchRandomSentence = async () => {
-    if (!selectedLanguage || !user) return
+    if (!sourceLanguage || !user) return
 
     setIsLoading(true)
     try {
-      // Get a random English sentence that hasn't been translated by this user in the selected language
-      const { data: sentences, error } = await supabase
-        .from("english_sentences")
-        .select(`
-          id,
-          text_content,
-          category,
-          difficulty_level
-        `)
-        .eq("is_active", true)
-        .not(
-          "id",
-          "in",
-          `(
-          SELECT english_sentence_id 
-          FROM translations 
-          WHERE translator_id = '${user.id}' 
-          AND target_language = '${selectedLanguage}'
-        )`,
-        )
-        .limit(10)
+      const response = await fetch(`/api/random-sentence?language=${sourceLanguage}&category=&difficulty=`)
 
-      if (error) throw error
+      if (!response.ok) {
+        throw new Error("Failed to fetch sentence")
+      }
 
-      if (sentences && sentences.length > 0) {
-        // Pick a random sentence from the results
-        const randomIndex = Math.floor(Math.random() * sentences.length)
-        setCurrentSentence(sentences[randomIndex])
+      const data = await response.json()
+
+      if (data.sentence) {
+        setCurrentSentence(data.sentence)
         setTranslation("")
       } else {
         toast({
           title: "No sentences available",
-          description: "You have translated all available sentences in this language.",
+          description: "No sentences found for the selected criteria.",
         })
       }
     } catch (error: any) {
@@ -160,23 +144,25 @@ export default function TranslatePage() {
   }
 
   const submitTranslation = async () => {
-    if (!currentSentence || !translation.trim() || !user || !selectedLanguage) return
+    if (!currentSentence || !translation.trim() || !user || !targetLanguage) return
 
     setIsSubmitting(true)
     try {
-      const { error } = await supabase.from("translations").insert({
-        english_sentence_id: currentSentence.id,
-        translator_id: user.id,
-        translated_text: translation.trim(),
-        target_language: selectedLanguage,
-        review_status: "pending",
+      const { error } = await supabase.from("user_translations").insert({
+        user_id: user.id,
+        sentence_id: currentSentence.id,
+        user_translation: translation.trim(),
+        source_language: sourceLanguage,
+        target_language: targetLanguage,
+        score: 0, // Will be updated after review
+        time_taken_seconds: null, // Could be tracked in future
       })
 
       if (error) throw error
 
       toast({
         title: "Success",
-        description: "Translation submitted successfully! It will be reviewed shortly.",
+        description: "Translation submitted successfully! Keep practicing to improve your skills.",
       })
 
       // Reset form and load new sentence
@@ -201,11 +187,11 @@ export default function TranslatePage() {
 
   const getDifficultyColor = (difficulty: string) => {
     switch (difficulty) {
-      case "easy":
+      case "beginner":
         return "bg-green-100 text-green-800"
-      case "medium":
+      case "intermediate":
         return "bg-yellow-100 text-yellow-800"
-      case "hard":
+      case "advanced":
         return "bg-red-100 text-red-800"
       default:
         return "bg-gray-100 text-gray-800"
@@ -216,7 +202,9 @@ export default function TranslatePage() {
     switch (category) {
       case "news":
         return "bg-blue-100 text-blue-800"
-      case "literature":
+      case "healthcare":
+        return "bg-green-100 text-green-800"
+      case "general":
         return "bg-purple-100 text-purple-800"
       case "conversation":
         return "bg-orange-100 text-orange-800"
@@ -229,17 +217,13 @@ export default function TranslatePage() {
 
   if (!user || !userProfile) return null
 
-  const availableLanguages = AFRICAN_LANGUAGES.filter(
-    (lang) => userProfile.native_languages?.includes(lang.code) || userProfile.fluent_languages?.includes(lang.code),
-  )
-
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 p-4">
       <div className="max-w-4xl mx-auto">
         {/* Header */}
         <div className="flex justify-between items-center mb-6">
           <div>
-            <h1 className="text-2xl font-bold text-gray-900">Translation Dashboard</h1>
+            <h1 className="text-2xl font-bold text-gray-900">Translation Practice</h1>
             <p className="text-gray-600">Welcome back, {user.user_metadata?.full_name || user.email}</p>
           </div>
           <Button variant="outline" onClick={handleSignOut}>
@@ -253,7 +237,6 @@ export default function TranslatePage() {
           <DatabaseStatus />
         </div>
 
-        {/* Stats Cards */}
         <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
           <Card>
             <CardContent className="p-4">
@@ -263,20 +246,20 @@ export default function TranslatePage() {
           </Card>
           <Card>
             <CardContent className="p-4">
-              <div className="text-2xl font-bold text-yellow-600">{userStats.pending_reviews}</div>
-              <div className="text-sm text-gray-600">Pending Review</div>
+              <div className="text-2xl font-bold text-green-600">{userStats.correct_translations}</div>
+              <div className="text-sm text-gray-600">Correct Translations</div>
             </CardContent>
           </Card>
           <Card>
             <CardContent className="p-4">
-              <div className="text-2xl font-bold text-green-600">{userStats.approved_translations}</div>
-              <div className="text-sm text-gray-600">Approved</div>
+              <div className="text-2xl font-bold text-purple-600">{userStats.accuracy_percentage.toFixed(1)}%</div>
+              <div className="text-sm text-gray-600">Accuracy Rate</div>
             </CardContent>
           </Card>
           <Card>
             <CardContent className="p-4">
-              <div className="text-2xl font-bold text-red-600">{userStats.rejected_translations}</div>
-              <div className="text-sm text-gray-600">Rejected</div>
+              <div className="text-2xl font-bold text-orange-600">{userStats.average_score.toFixed(1)}</div>
+              <div className="text-sm text-gray-600">Average Score</div>
             </CardContent>
           </Card>
         </div>
@@ -284,32 +267,66 @@ export default function TranslatePage() {
         {/* Translation Interface */}
         <Card>
           <CardHeader>
-            <CardTitle>Translate English Sentences</CardTitle>
+            <CardTitle className="flex items-center gap-2">
+              <Globe className="w-5 h-5" />
+              Multilingual Translation Practice
+            </CardTitle>
             <CardDescription>
-              Select a target language and translate English sentences to help build the African language dataset
+              Practice translating between English, Kiswahili, and Kalenjin to help build African language resources
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-6">
-            {/* Language Selection */}
-            <div className="space-y-2">
-              <Label htmlFor="language">Target Language</Label>
-              <Select value={selectedLanguage} onValueChange={setSelectedLanguage}>
-                <SelectTrigger>
-                  <SelectValue placeholder="Select a language to translate to" />
-                </SelectTrigger>
-                <SelectContent>
-                  {availableLanguages.map((language) => (
-                    <SelectItem key={language.code} value={language.code}>
-                      {language.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="source-language">Source Language</Label>
+                <Select value={sourceLanguage} onValueChange={setSourceLanguage}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select source language" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {SOURCE_LANGUAGES.map((language) => (
+                      <SelectItem key={language.code} value={language.code}>
+                        {language.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="target-language">Target Language</Label>
+                <Select value={targetLanguage} onValueChange={setTargetLanguage}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select target language" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {TARGET_LANGUAGES.map((language, index) => (
+                      <SelectItem key={`${language.code}-${index}`} value={language.code}>
+                        {language.name} ({language.dialect})
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="dialect">Dialect</Label>
+                <Select value={selectedDialect} onValueChange={setSelectedDialect}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select dialect" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="Nandi">Nandi</SelectItem>
+                    <SelectItem value="Kipsigis">Kipsigis</SelectItem>
+                    <SelectItem value="Tugen">Tugen</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
             </div>
 
             {/* Get New Sentence Button */}
             <div className="flex gap-2">
-              <Button onClick={fetchRandomSentence} disabled={!selectedLanguage || isLoading} className="flex-1">
+              <Button onClick={fetchRandomSentence} disabled={!sourceLanguage || isLoading} className="flex-1">
                 <RefreshCw className={`w-4 h-4 mr-2 ${isLoading ? "animate-spin" : ""}`} />
                 {isLoading ? "Loading..." : "Get New Sentence"}
               </Button>
@@ -319,23 +336,28 @@ export default function TranslatePage() {
             {currentSentence && (
               <div className="space-y-4">
                 <div className="p-4 bg-gray-50 rounded-lg">
-                  <div className="flex gap-2 mb-2">
+                  <div className="flex gap-2 mb-3">
                     <Badge className={getCategoryColor(currentSentence.category)}>{currentSentence.category}</Badge>
                     <Badge className={getDifficultyColor(currentSentence.difficulty_level)}>
                       {currentSentence.difficulty_level}
                     </Badge>
+                    <Badge variant="outline">{currentSentence.source}</Badge>
+                    <Badge variant="secondary">{currentSentence.topic}</Badge>
                   </div>
-                  <p className="text-lg font-medium text-gray-900">{currentSentence.text_content}</p>
+                  <div className="mb-2">
+                    <span className="text-sm font-medium text-gray-600">
+                      {SOURCE_LANGUAGES.find((l) => l.code === currentSentence.original_language)?.name}:
+                    </span>
+                  </div>
+                  <p className="text-lg font-medium text-gray-900">{currentSentence.original_text}</p>
                 </div>
 
                 {/* Translation Input */}
                 <div className="space-y-2">
-                  <Label htmlFor="translation">
-                    Your Translation ({AFRICAN_LANGUAGES.find((l) => l.code === selectedLanguage)?.name})
-                  </Label>
+                  <Label htmlFor="translation">Your Translation (Kalenjin - {selectedDialect})</Label>
                   <Textarea
                     id="translation"
-                    placeholder="Enter your translation here..."
+                    placeholder="Enter your Kalenjin translation here..."
                     value={translation}
                     onChange={(e) => setTranslation(e.target.value)}
                     rows={4}
@@ -351,8 +373,11 @@ export default function TranslatePage() {
               </div>
             )}
 
-            {!currentSentence && selectedLanguage && (
-              <div className="text-center py-8 text-gray-500">Click "Get New Sentence" to start translating</div>
+            {!currentSentence && sourceLanguage && (
+              <div className="text-center py-8 text-gray-500">
+                Click "Get New Sentence" to start translating from{" "}
+                {SOURCE_LANGUAGES.find((l) => l.code === sourceLanguage)?.name} to Kalenjin
+              </div>
             )}
           </CardContent>
         </Card>
