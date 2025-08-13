@@ -77,6 +77,11 @@ export default function AuthForm() {
         setMessage({ type: "error", text: error.message })
       } else {
         setMessage({ type: "success", text: "Signed in successfully!" })
+
+        if (data.user) {
+          await supabase.rpc("update_last_login", { user_uuid: data.user.id })
+        }
+
         // The page will redirect automatically due to the auth state change
         window.location.reload()
       }
