@@ -13,25 +13,25 @@ import { toast } from "@/hooks/use-toast"
 import { LogOut, RefreshCw, Send, Globe } from "lucide-react"
 import { DatabaseStatus } from "@/components/database-status"
 
-const TARGET_LANGUAGES = [
-  { code: "kalenjin", name: "Kalenjin", dialect: "Nandi" },
-  { code: "kalenjin", name: "Kalenjin", dialect: "Kipsigis" },
-  { code: "kalenjin", name: "Kalenjin", dialect: "Tugen" },
+const KALENJIN_DIALECTS = [
+  { code: "nandi", name: "Nandi" },
+  { code: "kipsigis", name: "Kipsigis" },
+  { code: "tugen", name: "Tugen" },
+  { code: "marakwet", name: "Marakwet" },
 ]
 
 const SOURCE_LANGUAGES = [
   { code: "english", name: "English" },
-  { code: "swahili", name: "Kiswahili" },
+  { code: "kiswahili", name: "Kiswahili" },
 ]
 
 interface StandardSentence {
   id: string
-  original_text: string
-  original_language: string
+  text: string
+  language: string
   category: string
   difficulty_level: string
   source: string
-  topic: string
 }
 
 interface UserStats {
@@ -48,10 +48,11 @@ export default function TranslatePage() {
   const [currentSentence, setCurrentSentence] = useState<StandardSentence | null>(null)
   const [sourceLanguage, setSourceLanguage] = useState("english")
   const [targetLanguage, setTargetLanguage] = useState("kalenjin")
-  const [selectedDialect, setSelectedDialect] = useState("Nandi")
+  const [selectedDialect, setSelectedDialect] = useState("nandi")
   const [translation, setTranslation] = useState("")
   const [isLoading, setIsLoading] = useState(false)
   const [isSubmitting, setIsSubmitting] = useState(false)
+  const [startTime, setStartTime] = useState<Date | null>(null)
   const [userStats, setUserStats] = useState<UserStats>({
     total_translations: 0,
     correct_translations: 0,
@@ -80,6 +81,9 @@ export default function TranslatePage() {
           router.push("/setup-profile")
         } else {
           setUserProfile(profile)
+          if (profile.native_languages && profile.native_languages.includes("kalenjin")) {
+            setTargetLanguage("kalenjin")
+          }
           loadUserStats(user.id)
         }
       }
@@ -89,20 +93,23 @@ export default function TranslatePage() {
 
   const loadUserStats = async (userId: string) => {
     try {
-      const { data, error } = await supabase.rpc("get_user_translation_stats", {
-        p_user_id: userId,
-      })
+      const { data, error } = await supabase.from("user_translations").select("*").eq("user_id", userId)
 
       if (error) throw error
 
-      if (data && data.length > 0) {
-        const stats = data[0]
+      if (data) {
+        const totalTranslations = data.length
+        const correctTranslations = data.filter((t) => t.is_correct === true).length
+        const accuracyPercentage = totalTranslations > 0 ? (correctTranslations / totalTranslations) * 100 : 0
+        const averageScore = data.length > 0 ? data.reduce((sum, t) => sum + (t.score || 0), 0) / data.length : 0
+        const languagesPracticed = [...new Set(data.map((t) => t.target_language))]
+
         setUserStats({
-          total_translations: Number.parseInt(stats.total_translations) || 0,
-          correct_translations: Number.parseInt(stats.correct_translations) || 0,
-          accuracy_percentage: Number.parseFloat(stats.accuracy_percentage) || 0,
-          average_score: Number.parseFloat(stats.average_score) || 0,
-          languages_practiced: stats.languages_practiced || [],
+          total_translations: totalTranslations,
+          correct_translations: correctTranslations,
+          accuracy_percentage: accuracyPercentage,
+          average_score: averageScore,
+          languages_practiced: languagesPracticed,
         })
       }
     } catch (error: any) {
@@ -114,6 +121,7 @@ export default function TranslatePage() {
     if (!sourceLanguage || !user) return
 
     setIsLoading(true)
+    setStartTime(new Date())
     try {
       const response = await fetch(`/api/random-sentence?language=${sourceLanguage}&category=&difficulty=`)
 
@@ -148,26 +156,38 @@ export default function TranslatePage() {
 
     setIsSubmitting(true)
     try {
-      const { error } = await supabase.from("user_translations").insert({
-        user_id: user.id,
-        sentence_id: currentSentence.id,
-        user_translation: translation.trim(),
-        source_language: sourceLanguage,
-        target_language: targetLanguage,
-        score: 0, // Will be updated after review
-        time_taken_seconds: null, // Could be tracked in future
+      const timeTaken = startTime ? Math.floor((new Date().getTime() - startTime.getTime()) / 1000) : null
+
+      const response = await fetch("/api/submit-translation", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          sentence_id: currentSentence.id,
+          user_translation: translation.trim(),
+          source_language: sourceLanguage,
+          target_language: `${targetLanguage}_${selectedDialect}`,
+          time_taken_seconds: timeTaken,
+          user_id: user.id,
+        }),
       })
 
-      if (error) throw error
+      if (!response.ok) {
+        throw new Error("Failed to submit translation")
+      }
+
+      const result = await response.json()
 
       toast({
         title: "Success",
-        description: "Translation submitted successfully! Keep practicing to improve your skills.",
+        description: "Translation submitted for review! Your contribution helps build African language resources.",
       })
 
       // Reset form and load new sentence
       setTranslation("")
       setCurrentSentence(null)
+      setStartTime(null)
       loadUserStats(user.id)
     } catch (error: any) {
       toast({
@@ -183,6 +203,24 @@ export default function TranslatePage() {
   const handleSignOut = async () => {
     await supabase.auth.signOut()
     router.push("/")
+  }
+
+  const getAvailableTargetLanguages = () => {
+    if (!userProfile) return []
+
+    const languages = []
+
+    // Add Kiswahili if user is fluent
+    if (userProfile.fluent_languages?.includes("kiswahili")) {
+      languages.push({ code: "kiswahili", name: "Kiswahili" })
+    }
+
+    // Add native languages
+    if (userProfile.native_languages?.includes("kalenjin")) {
+      languages.push({ code: "kalenjin", name: "Kalenjin" })
+    }
+
+    return languages
   }
 
   const getDifficultyColor = (difficulty: string) => {
@@ -216,6 +254,8 @@ export default function TranslatePage() {
   }
 
   if (!user || !userProfile) return null
+
+  const availableTargetLanguages = getAvailableTargetLanguages()
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 p-4">
@@ -272,7 +312,8 @@ export default function TranslatePage() {
               Multilingual Translation Practice
             </CardTitle>
             <CardDescription>
-              Practice translating between English, Kiswahili, and Kalenjin to help build African language resources
+              Practice translating between English, Kiswahili, and your native language to help build African language
+              resources
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-6">
@@ -300,28 +341,32 @@ export default function TranslatePage() {
                     <SelectValue placeholder="Select target language" />
                   </SelectTrigger>
                   <SelectContent>
-                    {TARGET_LANGUAGES.map((language, index) => (
-                      <SelectItem key={`${language.code}-${index}`} value={language.code}>
-                        {language.name} ({language.dialect})
+                    {availableTargetLanguages.map((language) => (
+                      <SelectItem key={language.code} value={language.code}>
+                        {language.name}
                       </SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
               </div>
 
-              <div className="space-y-2">
-                <Label htmlFor="dialect">Dialect</Label>
-                <Select value={selectedDialect} onValueChange={setSelectedDialect}>
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select dialect" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="Nandi">Nandi</SelectItem>
-                    <SelectItem value="Kipsigis">Kipsigis</SelectItem>
-                    <SelectItem value="Tugen">Tugen</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
+              {targetLanguage === "kalenjin" && (
+                <div className="space-y-2">
+                  <Label htmlFor="dialect">Kalenjin Dialect</Label>
+                  <Select value={selectedDialect} onValueChange={setSelectedDialect}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select dialect" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {KALENJIN_DIALECTS.map((dialect) => (
+                        <SelectItem key={dialect.code} value={dialect.code}>
+                          {dialect.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
             </div>
 
             {/* Get New Sentence Button */}
@@ -342,22 +387,26 @@ export default function TranslatePage() {
                       {currentSentence.difficulty_level}
                     </Badge>
                     <Badge variant="outline">{currentSentence.source}</Badge>
-                    <Badge variant="secondary">{currentSentence.topic}</Badge>
                   </div>
                   <div className="mb-2">
                     <span className="text-sm font-medium text-gray-600">
-                      {SOURCE_LANGUAGES.find((l) => l.code === currentSentence.original_language)?.name}:
+                      {SOURCE_LANGUAGES.find((l) => l.code === currentSentence.language)?.name}:
                     </span>
                   </div>
-                  <p className="text-lg font-medium text-gray-900">{currentSentence.original_text}</p>
+                  <p className="text-lg font-medium text-gray-900">{currentSentence.text}</p>
                 </div>
 
                 {/* Translation Input */}
                 <div className="space-y-2">
-                  <Label htmlFor="translation">Your Translation (Kalenjin - {selectedDialect})</Label>
+                  <Label htmlFor="translation">
+                    Your Translation ({availableTargetLanguages.find((l) => l.code === targetLanguage)?.name}
+                    {targetLanguage === "kalenjin" &&
+                      ` - ${KALENJIN_DIALECTS.find((d) => d.code === selectedDialect)?.name}`}
+                    )
+                  </Label>
                   <Textarea
                     id="translation"
-                    placeholder="Enter your Kalenjin translation here..."
+                    placeholder={`Enter your ${targetLanguage === "kalenjin" ? "Kalenjin" : "Kiswahili"} translation here...`}
                     value={translation}
                     onChange={(e) => setTranslation(e.target.value)}
                     rows={4}
@@ -368,7 +417,7 @@ export default function TranslatePage() {
                 {/* Submit Button */}
                 <Button onClick={submitTranslation} disabled={!translation.trim() || isSubmitting} className="w-full">
                   <Send className="w-4 h-4 mr-2" />
-                  {isSubmitting ? "Submitting..." : "Submit Translation"}
+                  {isSubmitting ? "Submitting..." : "Submit Translation for Review"}
                 </Button>
               </div>
             )}
@@ -376,7 +425,7 @@ export default function TranslatePage() {
             {!currentSentence && sourceLanguage && (
               <div className="text-center py-8 text-gray-500">
                 Click "Get New Sentence" to start translating from{" "}
-                {SOURCE_LANGUAGES.find((l) => l.code === sourceLanguage)?.name} to Kalenjin
+                {SOURCE_LANGUAGES.find((l) => l.code === sourceLanguage)?.name} to your selected target language
               </div>
             )}
           </CardContent>

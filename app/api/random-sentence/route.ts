@@ -3,14 +3,14 @@ import { type NextRequest, NextResponse } from "next/server"
 
 export async function GET(request: NextRequest) {
   try {
-    const supabase = createClient()
+    const supabase = await createClient()
     const { searchParams } = new URL(request.url)
 
     const language = searchParams.get("language") || "english"
     const category = searchParams.get("category") || null
     const difficulty = searchParams.get("difficulty") || null
 
-    let query = supabase.from("standard_sentences").select("*").eq("language", language).eq("is_active", true)
+    let query = supabase.from("standard_sentences").select("*").eq("original_language", language).eq("is_active", true)
 
     // Add optional filters
     if (category) {
@@ -20,11 +20,11 @@ export async function GET(request: NextRequest) {
       query = query.eq("difficulty_level", difficulty)
     }
 
-    // Get a random sentence by ordering randomly and limiting to 1
-    const { data, error } = await query.order("id", { ascending: false }).limit(50) // Get 50 to choose from randomly
+    // Get random sentences
+    const { data, error } = await query.limit(50)
 
-    if (error) {
-      console.error("Error fetching sentences:", error)
+    if (error || !data || data.length === 0) {
+      console.log("Trying fallback to english_sentences table")
 
       const fallbackQuery = supabase.from("english_sentences").select("*").eq("is_active", true).limit(50)
 
@@ -43,7 +43,7 @@ export async function GET(request: NextRequest) {
       const randomIndex = Math.floor(Math.random() * fallbackData.length)
       const randomSentence = {
         id: fallbackData[randomIndex].id,
-        text: fallbackData[randomIndex].text,
+        text: fallbackData[randomIndex].text_content,
         language: "english",
         category: fallbackData[randomIndex].category || "general",
         difficulty_level: fallbackData[randomIndex].difficulty_level || "intermediate",
@@ -53,13 +53,20 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ sentence: randomSentence })
     }
 
-    if (!data || data.length === 0) {
-      return NextResponse.json({ error: "No sentences found" }, { status: 404 })
-    }
-
     // Pick a random sentence from the results
     const randomIndex = Math.floor(Math.random() * data.length)
-    return NextResponse.json({ sentence: data[randomIndex] })
+    const selectedSentence = data[randomIndex]
+
+    const randomSentence = {
+      id: selectedSentence.id,
+      text: selectedSentence.original_text,
+      language: selectedSentence.original_language,
+      category: selectedSentence.category || "general",
+      difficulty_level: selectedSentence.difficulty_level || "intermediate",
+      source: selectedSentence.source || "system",
+    }
+
+    return NextResponse.json({ sentence: randomSentence })
   } catch (error) {
     console.error("API error:", error)
     return NextResponse.json({ error: "Internal server error" }, { status: 500 })
