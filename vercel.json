@@ -1,0 +1,35 @@
+{
+  "domains": ["ndovu.guru", "www.ndovu.guru"],
+  "redirects": [
+    {
+      "source": "/(.*)",
+      "destination": "https://ndovu.guru/$1",
+      "permanent": true,
+      "has": [
+        {
+          "type": "host",
+          "value": "www.ndovu.guru"
+        }
+      ]
+    }
+  ],
+  "headers": [
+    {
+      "source": "/(.*)",
+      "headers": [
+        {
+          "key": "X-Frame-Options",
+          "value": "DENY"
+        },
+        {
+          "key": "X-Content-Type-Options",
+          "value": "nosniff"
+        },
+        {
+          "key": "Referrer-Policy",
+          "value": "origin-when-cross-origin"
+        }
+      ]
+    }
+  ]
+}
