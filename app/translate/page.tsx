@@ -10,7 +10,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Badge } from "@/components/ui/badge"
 import { useRouter } from "next/navigation"
 import { toast } from "@/hooks/use-toast"
-import { LogOut, RefreshCw, Send, Globe } from "lucide-react"
+import { LogOut, RefreshCw, Send, Globe, Mic } from "lucide-react"
 import { DatabaseStatus } from "@/components/database-status"
 
 const KALENJIN_DIALECTS = [
@@ -264,12 +264,21 @@ export default function TranslatePage() {
         <div className="flex justify-between items-center mb-6">
           <div>
             <h1 className="text-2xl font-bold text-gray-900">Translation Practice</h1>
-            <p className="text-gray-600">Welcome back, {user.user_metadata?.full_name || user.email}</p>
+            <p className="text-gray-600">Welcome back, {user?.user_metadata?.full_name || user?.email}</p>
           </div>
-          <Button variant="outline" onClick={handleSignOut}>
-            <LogOut className="w-4 h-4 mr-2" />
-            Sign Out
-          </Button>
+          <div className="flex gap-2">
+            <Button variant="outline" onClick={() => router.push("/voice-recording")}>
+              <Mic className="w-4 h-4 mr-2" />
+              Voice Recording
+            </Button>
+            <Button variant="outline" onClick={() => router.push("/settings")}>
+              Settings
+            </Button>
+            <Button variant="outline" onClick={handleSignOut}>
+              <LogOut className="w-4 h-4 mr-2" />
+              Sign Out
+            </Button>
+          </div>
         </div>
 
         {/* Database Status */}
