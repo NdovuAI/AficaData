@@ -1,7 +1,6 @@
 export const DOMAIN_CONFIG = {
-  production: "https://ndovu.guru",
+  production: process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : "https://translator-system.vercel.app",
   development: "http://localhost:3000",
-  staging: "https://staging.ndovu.guru", // if needed later
 } as const
 
 export const AUTH_REDIRECT_URLS = {

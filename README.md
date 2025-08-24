@@ -20,7 +20,7 @@ The African Language Translation Platform is designed to bridge language gaps by
 - **Backend**: Node.js, Supabase (PostgreSQL)
 - **Authentication**: Supabase Auth with RBAC
 - **Database**: 7 configured tables with Row Level Security
-- **Deployment**: Vercel, Docker, Kubernetes support
+- **Deployment**: Vercel (default domain), Docker, Kubernetes support
 - **Domain**: ndovu.guru (Hostinger)
 
 ## 📋 Prerequisites
@@ -196,6 +196,7 @@ kubectl scale deployment translator-app --replicas=3
 1. Connect your GitHub repository to Vercel
 2. Configure environment variables in Vercel dashboard
 3. Deploy automatically on push to main branch
+4. Your app will be available at your-project-name.vercel.app
 
 ### Manual Deployment
 \`\`\`bash

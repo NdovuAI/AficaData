@@ -1,18 +1,4 @@
 {
-  "domains": ["ndovu.guru", "www.ndovu.guru"],
-  "redirects": [
-    {
-      "source": "/(.*)",
-      "destination": "https://ndovu.guru/$1",
-      "permanent": true,
-      "has": [
-        {
-          "type": "host",
-          "value": "www.ndovu.guru"
-        }
-      ]
-    }
-  ],
   "headers": [
     {
       "source": "/(.*)",
